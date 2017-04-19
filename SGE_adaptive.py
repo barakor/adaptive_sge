@@ -68,22 +68,24 @@ class SGECluster(object):
         for queue_master, queue, limit in self.cluster_queue_master:
             ssh.connect(queue_master)
             stdout = int(ssh.exec_command("qstat -g d | wc -l")[1].readlines()[0]) -2
-            if limit == 0:
-                stdout=-1
-            if stdout < limit:
-                nodes_amount=int(n/len(self.cluster_queue_master))
-                if nodes_amount+stdout > limit:
-                    nodes_amount=limit-stdout
-                task="""ssh {queue_master} /home/barakor/scripts_ofir/scripts/adaptive/lift_cluster {source_dir} {cluster_output_dir} {py_project_path} {django_settings_module} {nthreads} {ip} {port} {queue} {project} {dworker} {nodes} \
-                """.format(queue_master=queue_master, \
-                        source_dir='--source {}'.format(self.source_dir), \
-                        cluster_output_dir='--output {}'.format(self.cluster_output_dir) if self.cluster_output_dir else '' , \
-                        py_project_path='--PYTHONPATH {}'.format(self.py_project_path), \
-                        django_settings_module='--DJANGO_MODULE {}'.format(self.django_settings_module), \
-                        nthreads='--nthreads {}'.format(self.nthreads), ip='--ip {}'.format(ip), port='--port {}'.format(port), \
-                        queue="--queue {}".format(queue) if queue else '', dworker='--dworker {}'.format(self.dworker),\
-                        nodes='--nodes {}'.format(nodes_amount))
-                subprocess.call(task, shell=True)
+            pending  = int(ssh.exec_command("qstat -g d -s p | wc -l")[1].readlines()[0]) -2
+            if pending == 0:
+                if limit == 0:
+                    stdout = -1
+                if stdout < limit:
+                    nodes_amount=int(n/len(self.cluster_queue_master))
+                    if nodes_amount+stdout > limit:
+                        nodes_amount=limit-stdout
+                    task="""ssh {queue_master} /home/barakor/scripts_ofir/scripts/adaptive/lift_cluster {source_dir} {cluster_output_dir} {py_project_path} {django_settings_module} {nthreads} {ip} {port} {queue} {project} {dworker} {nodes} \
+                    """.format(queue_master=queue_master, \
+                            source_dir='--source {}'.format(self.source_dir), \
+                            cluster_output_dir='--output {}'.format(self.cluster_output_dir) if self.cluster_output_dir else '' , \
+                            py_project_path='--PYTHONPATH {}'.format(self.py_project_path), \
+                            django_settings_module='--DJANGO_MODULE {}'.format(self.django_settings_module), \
+                            nthreads='--nthreads {}'.format(self.nthreads), ip='--ip {}'.format(ip), port='--port {}'.format(port), \
+                            queue="--queue {}".format(queue) if queue else '', dworker='--dworker {}'.format(self.dworker),\
+                            nodes='--nodes {}'.format(nodes_amount))
+                    subprocess.call(task, shell=True)
 
     def scale_down(self, workers=[]):
         """
