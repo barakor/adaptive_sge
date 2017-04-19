@@ -1,0 +1,177 @@
+from __future__ import print_function, division, absolute_import
+
+import atexit
+import json
+import logging
+import os
+import socket
+import subprocess
+import sys
+from time import sleep
+
+import click
+
+import distributed
+from distributed import Scheduler
+from distributed.utils import ignoring, open_port
+from distributed.http import HTTPScheduler
+from distributed.deploy import Adaptive
+from distributed.cli.utils import check_python_3, install_signal_handlers, uri_from_host_port
+from tornado.ioloop import IOLoop
+
+from concurrent.futures import ThreadPoolExecutor
+import subprocess
+
+logger = logging.getLogger('distributed.scheduler')
+
+class SGECluster(object):
+
+    def __init__(self, scheduler, cluster_queue_master,
+                    cluster_output_dir, py_project_path, django_settings_module,
+                    source_dir, dworker,
+                    executable='dask-worker',
+                    name=None, nthreads=1, project = 'centos7',
+                    **kwargs):
+        self.scheduler = scheduler
+        self.executor = ThreadPoolExecutor(1)
+        self.cluster_queue_master = cluster_queue_master
+        self.cluster_output_dir = cluster_output_dir
+        self.py_project_path = py_project_path
+        self.django_settings_module = django_settings_module
+        self.source_dir = source_dir
+        self.nthreads = nthreads
+        self.project = project
+        self.dworker = dworker
+        # address = self.scheduler.address.split('//')[1]
+        # self.ip = address.split(':')[0]
+        # self.port = address.split(':')[1]
+
+    def scale_up(self, n):
+        """
+        Bring the total count of workers up to ``n``
+
+        This function/coroutine should bring the total number of workers up to
+        the number ``n``.
+
+        This can be implemented either as a function or as a Tornado coroutine.
+        """
+        if n == 1:
+            n=len(self.cluster_queue_master)
+        address = self.scheduler.address.split('//')[1]
+        ip = address.split(':')[0]
+        port = address.split(':')[1]
+        for queue_master, queue in self.cluster_queue_master:
+            subprocess.call('ssh {queue_master} \
+                /home/barakor/scripts_ofir/scripts/adaptive/lift_cluster -s {source_dir} \
+                -o {cluster_output_dir} -py {py_project_path} -d {django_settings_module} -t {nthreads}\
+                -i {ip} -p {port} {queue} {project} -w {dworker} -n {nodes}\
+                '.format(queue_master=queue_master, source_dir=self.source_dir,\
+                    cluster_output_dir=self.cluster_output_dir, \
+                    py_project_path=self.py_project_path,
+                    django_settings_module=self.django_settings_module, \
+                    nthreads=self.nthreads, ip=ip, port=port,
+                    queue="-q {}"format(queue), project="-p {}"format(self.project), dworker=self.dworker,\
+                    nodes=int(n/len(self.cluster_queue_master))), shell=True)
+
+    def scale_down(self, workers=[]):
+        """
+        Remove ``workers`` from the cluster
+
+        Given a list of worker addresses this function should remove those
+        workers from the cluster.  This may require tracking which jobs are
+        associated to which worker address.
+
+        This can be implemented either as a function or as a Tornado coroutine.
+        """
+        if workers:
+            for w in workers:
+                self.executor.submit(self.client.kill_task,
+                                     self.app.id,
+                                     self.scheduler.worker_info[w]['name'],
+                                     scale=True)
+        else:
+#             for w in self.
+            pass
+@click.command()
+@click.option('--port', type=int, default=None, help="Serving port")
+# XXX default port (or URI) values should be centralized somewhere
+@click.option('--http-port', type=int, default=9786, help="HTTP port")
+@click.option('--bokeh-port', type=int, default=8787, help="Bokeh port")
+@click.option('--bokeh-internal-port', type=int, default=8788,
+              help="Internal Bokeh port")
+@click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
+              required=False, help="Launch Bokeh Web UI")
+@click.option('--host', type=str, default='',
+              help="IP, hostname or URI of this server")
+@click.option('--show/--no-show', default=False, help="Show web UI")
+@click.option('--bokeh-whitelist', default=None, multiple=True,
+              help="IP addresses to whitelist for bokeh.")
+@click.option('--prefix', type=str, default=None,
+              help="Prefix for the bokeh app")
+@click.option('--use-xheaders', type=bool, default=False, show_default=True,
+              help="User xheaders in bokeh app for ssl termination in header")
+@click.option('--pid-file', type=str, default='',
+              help="File to write the process PID")
+@click.option('--scheduler-file', type=str, default='',
+              help="File to write connection information. "
+              "This may be a good way to share connection information if your "
+              "cluster is on a shared network file system.")
+
+@click.option('--cluster_queue_master', type=list, default=[('','')],
+              help="cluster queue master and queue name respectivly")
+@click.option('--cluster_output_dir', type=list, default='$HOME',
+              help="cluster log output dir")
+@click.option('--py_project_path', type=list, default=None,
+              help="the python project path, if more than one is available, separate it with ':'")
+@click.option('--django_settings_module', type=list, default=None,
+              help="if you are using django, state the settings module here")
+@click.option('--source_dir', type=list, default=None,
+              help="python enviroment dir, please direct to the folder, and not the activation file itself")
+@click.option('--nthreads', type=list, default=1,
+              help="how many threads would you want, it's recomended to keep it at 1 if it's a shared cluster")
+@click.option('--project', type=list, default=1,
+              help="SGE project name")
+@click.option('--dworker', type=list, default=1,
+              help="dworker directory")
+
+    host = '132.76.81.158'
+    port = 4693
+    http_port = 4692
+    bokeh_port = 4691
+    bokeh_internal_port = 4690
+
+    addr = uri_from_host_port(host, port, 8786)
+
+    loop = IOLoop.current()
+    logger.info('-' * 47)
+
+    services = {('http', http_port): HTTPScheduler}
+    with ignoring(ImportError):
+        from distributed.bokeh.scheduler import BokehScheduler
+        services[('bokeh', bokeh_internal_port)] = BokehScheduler
+
+    scheduler = Scheduler(loop=loop, services=services)
+
+    cluster = SGECluster(scheduler=scheduler, cluster_queue_master=[('mcluster03', 'all2.q')],
+                    cluster_output_dir = "/home/barakor/cluster_output/",
+                    py_project_path = "/home/barakor/s/barak/code/clineage:/home/barakor/s/barak/code/hist_calling/",
+                    django_settings_module = "clineage.settings",
+                    source_dir = "/home/barakor/.venvs/ntb/bin",
+                    dworker = "/home/barakor/scripts_ofir/scripts/adaptive/dworker.q")
+    adapative_cluster = Adaptive(scheduler, cluster)
+    scheduler.start(addr)
+
+    from distributed.bokeh.application import BokehWebInterface
+    bokeh_proc = BokehWebInterface(http_port=http_port,
+            scheduler_address=scheduler.address, bokeh_port=bokeh_port, quiet=False)
+
+    logger.info('-' * 47)
+    try:
+        loop.start()
+        loop.close()
+    finally:
+        scheduler.stop()
+        if bokeh_proc:
+            bokeh_proc.close()
+
+    logger.info("End scheduler at %r", addr)

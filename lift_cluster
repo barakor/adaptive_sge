@@ -1,0 +1,103 @@
+#!/bin/bash
+
+function usage
+{
+    echo "
+    ATTENTION: This script was written with the inttention of being run on the
+    queue master.
+    This scripts launches tasks to the cluster queue master.
+    usage:
+    -s | --source )         virtual env path, bash activate
+
+    -o | --output )         cluster output directory
+
+    -py | --PYTHONPATH )     python project path, argument passed to dask-worker
+
+    -d | --DJANGO_MODULE )  django settings module, usually 'DJANGOPROJECTNAME.settings'
+
+    -t | --nthreads )       number of nthreads for the dask-worker, if you are on a shared cluster
+                            it might be politer to use 1 here.
+                            defaults to 1 if not giver
+
+    -i | --ip )             distributed scheduler ip address
+
+    -p | --port )           distributed scheduler port address.
+                            default to 8787 if not given.
+
+    -n | --nodes )          number of nodes to be launched, due to the logic
+                            behind the Adaptive method of distributed, this can
+                            be either 1, 2, or n (given by the logic).
+                            defaults to 1 if not given.
+
+    -q | --queue )          OPTIONAL: queue name
+
+    -P | --project_name )   Specifies the project to which this  job  is  assigned.
+                            The  administrator  needs to give permission to
+                            individual users to submit jobs to a specific  project.
+
+    -w | --dworker )        directory to dworker script location
+
+    -h | --help )           print this help info
+                            "
+}
+while [ "$1" != "" ]; do
+    case $1 in
+        -s | --source )         shift
+                                source_dir=$1
+                                ;;
+        -o | --output )         shift
+                                cluster_output_dir=$1
+                                ;;
+        -py | --PYTHONPATH )    shift
+                                pythonpath=$1
+                                ;;
+        -d | --DJANGO_MODULE )  shift
+                                django_settings_module=$1
+                                ;;
+        -t | --nthreads )       shift
+                                nthreads=$1
+                                ;;
+        -i | --ip )             shift
+                                ip=$1
+                                ;;
+        -p | --port )           shift
+                                port=$1
+                                ;;
+        -n | --nodes )          shift
+                                nodes=$1
+                                ;;
+        -q | --queue )          shift
+                                queue=$1
+                                ;;
+        -P | --project_name )   shift
+                                project_name=$1
+                                ;;
+        -w | --dworker )        shift
+                                dworker=$1
+                                ;;
+        -h | --help )           usage
+                                exit
+                                ;;
+        * )                     usage
+                                exit 1
+    esac
+    shift
+done
+if [[ -z $source_dir ]] | [[ -z $pythonpath ]] | [[ -z $django_settings_module ]] | [[ -z $ip ]] | [[ -z $dworker ]] ; then
+    echo "missing arguments"
+    exit
+fi
+if [[ -z $port ]]; then
+    port=8787
+fi
+if [[ -z $nthreads ]]; then
+    nthreads=1
+fi
+if [[ -z $nodes ]]; then
+    nodes=1
+fi
+if [[ -z $queue ]]; then
+    echo """$dworker --source $source_dir --output $cluster_output_dir --PYTHONPATH $pythonpath --DJANGO_MODULE $django_settings_module --nthreads $nthreads --ip $ip --port $port""" | qsub -P $project_name -t "1-$nodes" -N dworker
+else
+    echo """$dworker --source $source_dir --output $cluster_output_dir --PYTHONPATH $pythonpath --DJANGO_MODULE $django_settings_module --nthreads $nthreads --ip $ip --port $port""" | qsub -q $queue -P $project_name -t "1-$nodes" -N dworker
+fi

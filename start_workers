@@ -1,0 +1,4 @@
+#!/bin/bash
+exec ssh mcluster03 
+echo $HOSTNAME
+#ssh $cluster_machine ~/scripts_ofir/scripts/lift_cluster_no_kill $1 all2.q
